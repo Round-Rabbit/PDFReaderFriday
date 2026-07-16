@@ -233,13 +233,15 @@
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .reader-canvas-wrap{
-    flex:1; overflow:auto;
-    display:flex; justify-content:center;
-    padding:14px 0 10px;
+    flex:1; overflow-y:auto; overflow-x:hidden;
+    display:flex; justify-content:center; align-items:flex-start;
+    padding:14px 12px 10px;
     background:#2a2a2a;
+    -webkit-user-select:none; user-select:none;
+    touch-action:pan-y;
   }
-  #pdf-canvas-container{position:relative; box-shadow:0 8px 24px rgba(0,0,0,0.45);}
-  #pdf-canvas{display:block;}
+  #pdf-canvas-container{position:relative; box-shadow:0 8px 24px rgba(0,0,0,0.45); max-width:100%; flex-shrink:0;}
+  #pdf-canvas{display:block; max-width:100%; height:auto;}
   #text-layer{
     position:absolute; top:0; left:0;
     line-height:1; opacity:0.0001; /* invisible but selectable */
@@ -682,8 +684,24 @@ async function openBook(fileEntry){
   }
 }
 
+function computeFitScale(page){
+  const wrap = document.getElementById('reader-canvas-wrap');
+  const availWidth = wrap.clientWidth - 24; // account for side padding
+  const availHeight = wrap.clientHeight - 24;
+  const baseViewport = page.getViewport({scale: 1});
+  const scaleForWidth = availWidth / baseViewport.width;
+  const scaleForHeight = availHeight / baseViewport.height;
+  // fit width primarily (reading mode), but never render larger than fitting height by too much
+  let scale = scaleForWidth;
+  if (scale * baseViewport.height > availHeight * 1.8){
+    scale = Math.min(scale, scaleForHeight * 1.8);
+  }
+  return Math.max(0.3, scale);
+}
+
 async function renderPage(pageNum){
   const page = await state.pdfDoc.getPage(pageNum);
+  state.scale = computeFitScale(page);
   const viewport = page.getViewport({scale: state.scale});
   const canvas = document.getElementById('pdf-canvas');
   const ctx = canvas.getContext('2d');
@@ -742,6 +760,45 @@ document.getElementById('page-slider').addEventListener('change', (e) => {
 document.getElementById('btn-back-lib').addEventListener('click', () => {
   renderLibrary(document.getElementById('lib-search').value);
   showScreen('screen-library');
+});
+
+/* ---- responsive re-fit on resize / orientation change ---- */
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  if (!state.pdfDoc) return;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    renderPage(state.currentPage);
+  }, 200);
+});
+
+/* ---- tap navigation: 1 tap = next page, 2 taps = previous page ---- */
+function goToPage(n){
+  if (!state.pdfDoc) return;
+  const clamped = Math.min(Math.max(n, 1), state.totalPages);
+  if (clamped !== state.currentPage || n !== clamped){
+    renderPage(clamped);
+  }
+}
+
+let tapTimer = null;
+let tapCount = 0;
+document.getElementById('reader-canvas-wrap').addEventListener('click', (e) => {
+  // ignore taps that are actually text selection
+  const selection = window.getSelection();
+  if (selection && selection.toString().length > 0) return;
+
+  tapCount++;
+  if (tapCount === 1){
+    tapTimer = setTimeout(() => {
+      goToPage(state.currentPage + 1);
+      tapCount = 0;
+    }, 260);
+  } else if (tapCount === 2){
+    clearTimeout(tapTimer);
+    goToPage(state.currentPage - 1);
+    tapCount = 0;
+  }
 });
 
 /* ===================================================================
