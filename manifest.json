@@ -1,0 +1,17 @@
+{
+  "name": "Rak — Baca E-book PDF-mu",
+  "short_name": "Rak",
+  "description": "Simpan dan baca koleksi e-book PDF pribadimu langsung dari perangkat.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B2A4A",
+  "theme_color": "#0B2A4A",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
