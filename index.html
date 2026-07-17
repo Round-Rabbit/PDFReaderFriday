@@ -240,15 +240,15 @@
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .reader-canvas-wrap{
-    flex:1; overflow-y:auto; overflow-x:hidden;
+    flex:1; overflow:auto;
     display:flex; justify-content:center; align-items:flex-start;
     padding:14px 12px 10px;
     background:#2a2a2a;
     -webkit-user-select:none; user-select:none;
-    touch-action:pan-y;
+    touch-action:pan-x pan-y;
   }
-  #pdf-canvas-container{position:relative; box-shadow:0 8px 24px rgba(0,0,0,0.45); max-width:100%; flex-shrink:0;}
-  #pdf-canvas{display:block; max-width:100%; height:auto;}
+  #pdf-canvas-container{position:relative; box-shadow:0 8px 24px rgba(0,0,0,0.45); flex-shrink:0;}
+  #pdf-canvas{display:block;}
   #text-layer{
     position:absolute; top:0; left:0;
     line-height:1; opacity:0.0001; /* invisible but selectable */
@@ -294,6 +294,17 @@
     border:2px solid var(--blue-100);
   }
   .swatch.selected{border-color:var(--gold-500); box-shadow:0 0 0 2px var(--gold-300);}
+  .zoom-chips{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:6px;}
+  .zoom-chip{
+    padding:12px 0; width:64px;
+    border-radius:10px; border:1.5px solid var(--blue-100);
+    background:var(--blue-050); color:var(--blue-800);
+    font-weight:700; font-size:13px;
+  }
+  .zoom-chip.selected{
+    background:linear-gradient(180deg,var(--gold-500),var(--gold-600));
+    border-color:var(--gold-600); color:var(--blue-900);
+  }
   .panel input[type=range]{width:100%; accent-color:var(--gold-500);}
   .panel-label{font-size:12px; color:var(--blue-700); display:flex; justify-content:space-between; margin-bottom:6px;}
   .search-results{margin-top:14px; display:flex; flex-direction:column; gap:6px;}
@@ -348,6 +359,7 @@
   <div class="reader-top">
     <button class="icon-btn" id="btn-back-lib">←</button>
     <div class="reader-title" id="reader-title">-</div>
+    <button class="icon-btn" id="btn-open-zoom" title="Perbesar">🔎</button>
     <button class="icon-btn" id="btn-open-search">🔍</button>
     <button class="icon-btn" id="btn-open-color">🎨</button>
   </div>
@@ -374,6 +386,15 @@
     <div class="panel-label"><span>Putih</span><span>Krem Kekuningan</span></div>
     <input type="range" id="sepia-slider" min="0" max="100" value="0">
     <button class="btn btn-outline" style="margin-top:18px;" id="btn-close-color">Tutup</button>
+  </div>
+</div>
+
+<!-- ============ ZOOM PANEL ============ -->
+<div class="panel-overlay" id="overlay-zoom">
+  <div class="panel">
+    <h3>Perbesar Halaman</h3>
+    <div class="zoom-chips" id="zoom-chips"></div>
+    <button class="btn btn-outline" style="margin-top:18px;" id="btn-close-zoom">Tutup</button>
   </div>
 </div>
 
@@ -458,8 +479,10 @@ const state = {
   totalPages: 1,
   sepia: 0,
   scale: 1.3,
+  zoomLevel: 1,
   searchIndex: null,  // cached text per page for current doc
 };
+const zoomLevels = [1, 1.5, 2, 2.5, 3];
 
 const fsaSupported = 'showDirectoryPicker' in window;
 
@@ -668,9 +691,11 @@ async function openBook(fileEntry){
     const progress = await idbGet("progress", fileEntry.name);
     state.currentPage = progress && progress.page <= state.totalPages ? progress.page : 1;
     state.sepia = progress && progress.sepia != null ? progress.sepia : 0;
+    state.zoomLevel = progress && progress.zoom ? progress.zoom : 1;
     document.getElementById('sepia-slider').value = state.sepia;
     applySepia();
     buildSwatches();
+    buildZoomChips();
 
     document.getElementById('page-slider').max = state.totalPages;
     document.getElementById('page-slider').value = state.currentPage;
@@ -708,16 +733,23 @@ function computeFitScale(page){
 
 async function renderPage(pageNum){
   const page = await state.pdfDoc.getPage(pageNum);
-  state.scale = computeFitScale(page);
+  const fitScale = computeFitScale(page);
+  state.scale = fitScale * state.zoomLevel;
   const viewport = page.getViewport({scale: state.scale});
   const canvas = document.getElementById('pdf-canvas');
   const ctx = canvas.getContext('2d');
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  document.getElementById('pdf-canvas-container').style.width = viewport.width + 'px';
-  document.getElementById('pdf-canvas-container').style.height = viewport.height + 'px';
 
-  await page.render({canvasContext: ctx, viewport}).promise;
+  // render at device pixel ratio so text stays sharp on high-density screens
+  const outputScale = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(viewport.width * outputScale);
+  canvas.height = Math.floor(viewport.height * outputScale);
+  canvas.style.width = Math.floor(viewport.width) + 'px';
+  canvas.style.height = Math.floor(viewport.height) + 'px';
+  document.getElementById('pdf-canvas-container').style.width = Math.floor(viewport.width) + 'px';
+  document.getElementById('pdf-canvas-container').style.height = Math.floor(viewport.height) + 'px';
+
+  const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+  await page.render({canvasContext: ctx, viewport, transform}).promise;
 
   // text layer for selection/search highlight
   const textLayerDiv = document.getElementById('text-layer');
@@ -746,7 +778,8 @@ function saveProgress(){
     await idbSet("progress", state.currentFile.name, {
       page: state.currentPage,
       totalPages: state.totalPages,
-      sepia: state.sepia
+      sepia: state.sepia,
+      zoom: state.zoomLevel
     });
     await idbSet("kv", "lastRead", {
       fileName: state.currentFile.name,
@@ -847,6 +880,30 @@ document.getElementById('sepia-slider').addEventListener('input', (e) => {
   buildSwatches();
 });
 document.getElementById('sepia-slider').addEventListener('change', saveProgress);
+
+/* ---- zoom (scale buttons: 1x, 1.5x, 2x, 2.5x, 3x) ---- */
+function buildZoomChips(){
+  const wrap = document.getElementById('zoom-chips');
+  wrap.innerHTML = '';
+  zoomLevels.forEach(z => {
+    const btn = document.createElement('button');
+    btn.className = 'zoom-chip' + (state.zoomLevel === z ? ' selected' : '');
+    btn.textContent = z === 1 ? 'Normal' : (z + 'x');
+    btn.addEventListener('click', () => {
+      state.zoomLevel = z;
+      buildZoomChips();
+      renderPage(state.currentPage);
+      saveProgress();
+    });
+    wrap.appendChild(btn);
+  });
+}
+document.getElementById('btn-open-zoom').addEventListener('click', () => {
+  document.getElementById('overlay-zoom').classList.add('active');
+});
+document.getElementById('btn-close-zoom').addEventListener('click', () => {
+  document.getElementById('overlay-zoom').classList.remove('active');
+});
 
 document.getElementById('btn-open-color').addEventListener('click', () => {
   document.getElementById('overlay-color').classList.add('active');
